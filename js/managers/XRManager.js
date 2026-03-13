@@ -92,26 +92,106 @@ export class XRManager {
     createWristUI() {
         const canvas = document.createElement('canvas');
         canvas.width = 256;
-        canvas.height = 128;
+        canvas.height = 256;
         const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#1e293b';
-        ctx.fillRect(0,0,256,128);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '20px Arial';
-        ctx.fillText('VR Mode: Move', 20, 40);
-        ctx.fillText('(Grip to Grab)', 20, 70);
+        this.wristCanvas = canvas;
+        this.wristCtx = ctx;
 
         const texture = new THREE.CanvasTexture(canvas);
-        const geometry = new THREE.PlaneGeometry(0.15, 0.08);
+        const geometry = new THREE.PlaneGeometry(0.2, 0.2);
         const material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
         this.wristUI = new THREE.Mesh(geometry, material);
+
         // Position on top of wrist
         this.wristUI.position.set(0, 0.05, 0.1);
         this.wristUI.rotation.x = -Math.PI / 4;
+
+        // Define interactive buttons on the canvas
+        this.uiButtons = [
+            { id: 'spawn', x: 20, y: 130, w: 100, h: 40, text: 'Spawn', color: '#3b82f6' },
+            { id: 'undo', x: 136, y: 130, w: 100, h: 40, text: 'Undo', color: '#64748b' },
+            { id: 'mode', x: 20, y: 190, w: 216, h: 40, text: 'Mode: MOVE', color: '#8b5cf6' }
+        ];
+
+        this.updateWristUI();
+    }
+
+    updateWristUI() {
+        if (!this.wristUI) return;
+        const ctx = this.wristCtx;
+
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(0,0,256,256);
+
+        // Header
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '24px Arial';
+        ctx.fillText('Brain Sim VR', 20, 40);
+        ctx.font = '16px Arial';
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText(this.currentMode === 'move' ? 'Grip: Grab | Trigger: UI' : 'Trigger: Draw Line', 20, 70);
+        ctx.fillText('Stick: Walk/Turn', 20, 95);
+
+        // Buttons
+        this.uiButtons.forEach(btn => {
+            if (btn.id === 'mode') {
+                btn.text = `Mode: ${this.currentMode.toUpperCase()}`;
+            }
+            ctx.fillStyle = btn.color;
+            ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '18px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(btn.text, btn.x + btn.w/2, btn.y + btn.h/2);
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'alphabetic';
+        });
+
+        this.wristUI.material.map.needsUpdate = true;
+    }
+
+    handleUIClick(uv) {
+        // Convert UV to Canvas coords
+        const x = uv.x * 256;
+        const y = (1 - uv.y) * 256; // UV y is inverted compared to canvas
+
+        for (const btn of this.uiButtons) {
+            if (x >= btn.x && x <= btn.x + btn.w && y >= btn.y && y <= btn.y + btn.h) {
+                this.executeUIAction(btn.id);
+                break;
+            }
+        }
+    }
+
+    executeUIAction(action) {
+        if (action === 'spawn') {
+            const spawnPos = new THREE.Vector3(0, 0, -1).applyMatrix4(this.draggingController ? this.draggingController.matrixWorld : this.camera.matrixWorld);
+            this.objectManager.spawnNameTag('Idea', null, 1, spawnPos);
+        } else if (action === 'undo') {
+            if (this.objectManager.historyManager) this.objectManager.historyManager.undo();
+        } else if (action === 'mode') {
+            this.currentMode = this.currentMode === 'move' ? 'connect' : 'move';
+            this.connectStartObj = null;
+            this.updateWristUI();
+        }
     }
 
     onSelectStart(event) {
         const controller = event.target;
+        // Check UI Intersection first
+        if (this.wristUI) {
+            this.tempMatrix.identity().extractRotation(controller.matrixWorld);
+            this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+            this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.tempMatrix);
+
+            const uiIntersects = this.raycaster.intersectObject(this.wristUI);
+            if (uiIntersects.length > 0) {
+                this.handleUIClick(uiIntersects[0].uv);
+                return;
+            }
+        }
+
         const intersections = this.getIntersections(controller);
 
         if (intersections.length > 0) {

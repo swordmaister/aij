@@ -4,14 +4,25 @@ import { InputManager } from './managers/InputManager.js';
 import { XRManager } from './managers/XRManager.js';
 import { NetworkManager } from './managers/NetworkManager.js';
 import { HistoryManager } from './managers/HistoryManager.js';
+import { LauncherManager } from './managers/LauncherManager.js';
 import * as THREE from 'https://unpkg.com/three@0.128.0/build/three.module.js';
 
 class App {
     constructor() {
-        this.sceneManager = new SceneManager('canvas-container');
+        this.launcherManager = new LauncherManager((mode) => this.init(mode));
+    }
+
+    init(mode) {
+        this.mode = mode;
+        this.sceneManager = new SceneManager('canvas-container', mode);
         this.objectManager = new ObjectManager(this.sceneManager);
-        this.inputManager = new InputManager(this.sceneManager, this.objectManager);
-        this.xrManager = new XRManager(this.sceneManager, this.objectManager);
+        this.inputManager = new InputManager(this.sceneManager, this.objectManager, mode);
+
+        if (mode === 'vr') {
+            this.xrManager = new XRManager(this.sceneManager, this.objectManager);
+        } else {
+            this.xrManager = { update: () => {} }; // Mock
+        }
 
         this.networkManager = new NetworkManager(this.objectManager);
         this.objectManager.setNetworkManager(this.networkManager);
@@ -24,6 +35,15 @@ class App {
         this.setupUI();
         this.spawnInitialObjects();
         this.startLoop();
+
+        // Auto-enable Gyro if mobile mode
+        if (mode === 'mobile') {
+            const btnGyro = document.getElementById('btn-gyro');
+            if(btnGyro) {
+                 this.inputManager.isGyroEnabled = true;
+                 btnGyro.classList.add('mode-active');
+            }
+        }
     }
 
     setupUI() {
