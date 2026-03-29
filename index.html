@@ -1,391 +1,99 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Anatomical Muscle Visualizer VR</title>
-    <style>
-        body { margin: 0; overflow: hidden; background-color: #111; }
-        #info {
-            position: absolute;
-            top: 10px;
-            width: 100%;
-            text-align: center;
-            color: white;
-            font-family: sans-serif;
-            pointer-events: none;
-            z-index: 1;
-        }
-    </style>
-    <!-- Import Map for modules -->
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-                "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
-            }
-        }
-    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Virtual Brain Simulator - Cloud & XR</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="css/style.css">
+
+    <!-- Supabase -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <!-- App Entry -->
+    <script type="module" src="js/main.js"></script>
 </head>
-<body>
-    <div id="info">
-        <h2>Muscle Structure VR Visualizer</h2>
-        <p>Use VR controller Trigger to toggle outer layer transparency.</p>
+<body class="no-select">
+
+    <!-- 3D Canvas -->
+    <div id="canvas-container"></div>
+    <div id="crosshair"></div>
+
+    <!-- Login / Connection Status -->
+    <div id="connection-status" class="absolute top-4 left-1/2 transform -translate-x-1/2 bg-black/50 text-white text-xs px-3 py-1 rounded-full z-50 flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-red-500" id="status-indicator"></span>
+        <span id="status-text">Disconnected</span>
     </div>
 
-    <script type="module">
-        import * as THREE from 'three';
-        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-        import { VRButton } from 'three/addons/webxr/VRButton.js';
-        import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
-        import * as CANNON from 'cannon-es';
+    <!-- Left UI: Input & Controls -->
+    <div id="ui-left" class="z-10">
+        <div class="glass-panel p-5 rounded-2xl shadow-lg">
+            <div class="flex justify-between items-center mb-4">
+                <h1 class="text-xl font-bold flex items-center gap-2">
+                    <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    Brain Sim XR
+                </h1>
+                <button id="btn-undo" class="btn bg-gray-600 hover:bg-gray-500 text-white text-xs px-3 py-1.5 rounded flex items-center gap-1" disabled>
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path></svg>
+                    Undo
+                </button>
+            </div>
+
+            <p class="text-[10px] text-gray-300 mb-2">カンマ(,)区切りで一気に複数作れます</p>
+            <div class="flex flex-col gap-3">
+                <input type="text" id="word-input" placeholder="例: 思考, 江戸, 未来" class="bg-gray-800 border border-gray-600 text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
+                <button id="btn-generate" class="btn bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg text-sm px-5 py-2.5 text-center">
+                    名札（ノード）を作る
+                </button>
+            </div>
+        </div>
+
+        <div class="glass-panel p-4 rounded-2xl shadow-lg flex flex-col gap-3">
+            <h2 class="text-sm font-semibold text-gray-300">Interaction Tools</h2>
+            <div class="grid grid-cols-2 gap-2">
+                <button id="btn-mode-move" class="mode-btn mode-active border border-gray-600 bg-gray-700 text-white text-xs py-2 rounded">Move / Select</button>
+                <div class="flex flex-col gap-1 border border-gray-600 bg-gray-700 rounded p-1">
+                    <button id="btn-mode-connect" class="mode-btn text-white text-xs py-1 rounded w-full">Draw Line (繋ぐ)</button>
+                    <div class="flex items-center gap-2 px-1">
+                        <span class="text-[9px] text-gray-400">太さ:</span>
+                        <input type="range" id="line-thickness" min="0.02" max="0.5" step="0.02" value="0.1" class="w-full h-1 bg-gray-500 rounded-lg appearance-none cursor-pointer">
+                    </div>
+                </div>
+                <button id="btn-group" class="btn border border-purple-500 text-purple-400 hover:bg-purple-500 hover:text-white text-xs py-2 rounded col-span-2">Group Selected (囲う)</button>
+                <button id="btn-save" class="btn border border-green-500 text-green-400 hover:bg-green-500 hover:text-white text-xs py-2 rounded">Save to Lib</button>
+                <button id="btn-delete" class="btn border border-red-500 text-red-400 hover:bg-red-500 hover:text-white text-xs py-2 rounded">Delete</button>
+            </div>
+
+            <!-- Mobile / Gyro Toggle -->
+            <div class="mt-2 border-t border-gray-600 pt-2">
+                <button id="btn-gyro" class="btn w-full border border-yellow-500 text-yellow-400 hover:bg-yellow-500 hover:text-white text-xs py-2 rounded flex justify-center items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                    Gyro Look (Mobile)
+                </button>
+            </div>
+
+            <div class="text-[10px] text-gray-300 bg-gray-800 p-2 rounded leading-relaxed mt-2">
+                <span class="text-blue-300 font-bold">基本操作:</span><br>
+                ・ドラッグ：平面移動　・ホイール：拡大縮小<br>
+                ・<span class="text-yellow-300 font-bold">Ctrl (Cmd) + クリック</span>：複数選択<br>
+                ・<span class="text-green-300 font-bold">W, A, S, Dキー</span>：歩く <span class="text-green-300 font-bold">Space</span>：ジャンプ<br>
+                ・<span class="text-green-300 font-bold">Shift + WASD</span>：ダッシュ（疾走り）<br>
+                ・<span class="text-purple-300 font-bold">背景をドラッグ</span>：首振り（視点移動）<br>
+                ・<span class="text-orange-300 font-bold">線をドラッグ</span>：ちぎって繋ぎ直す
+            </div>
+        </div>
+    </div>
+
+    <!-- Right UI: Asset Library -->
+    <div id="ui-right" class="glass-panel p-5 rounded-2xl shadow-lg z-10">
+        <h2 class="text-lg font-bold mb-4 flex items-center gap-2 border-b border-gray-600 pb-2">
+            <svg class="w-5 h-5 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+            Library
+        </h2>
+        <div id="library-container" class="flex flex-col gap-3">
+            <p class="text-xs text-gray-400 text-center italic" id="empty-lib-msg">まだ保存されていません。</p>
+        </div>
+    </div>
 
-        // --- Global Variables ---
-        let camera, scene, renderer;
-        let world, timeStep = 1 / 60;
-        let controllers = [], controllerGrips = [];
-
-        // Physics Objects
-        const physicsMeshes = [];
-        const physicsBodies = [];
-        let shoulderBody, armBody, armConstraint;
-
-        // Muscle System
-        const muscles = [];
-
-        // UI & Interaction
-        let raycaster;
-        const tempMatrix = new THREE.Matrix4();
-        let uiButton;
-        let isOuterLayerVisible = true;
-
-        class Muscle {
-            constructor(scene, originBody, localOrigin, insertionBody, localInsertion, options) {
-                this.originBody = originBody;
-                this.localOrigin = localOrigin; // CANNON.Vec3
-                this.insertionBody = insertionBody;
-                this.localInsertion = localInsertion; // CANNON.Vec3
-
-                this.options = options || {};
-                this.color = this.options.color || 0xff0000;
-                this.radius = this.options.radius || 0.05;
-                this.name = this.options.name || 'Muscle';
-
-                // Geometry
-                const geometry = new THREE.CylinderGeometry(1, 1, 1, 16);
-
-                // Material
-                const material = new THREE.MeshPhongMaterial({
-                    color: this.color,
-                    transparent: true,
-                    opacity: 0.9,
-                    shininess: 100
-                });
-
-                this.mesh = new THREE.Mesh(geometry, material);
-                this.mesh.castShadow = true;
-                scene.add(this.mesh);
-
-                // State
-                this.initialLength = null;
-            }
-
-            update() {
-                // Get World Positions
-                const worldOrigin = this.originBody.pointToWorldFrame(this.localOrigin);
-                const worldInsertion = this.insertionBody.pointToWorldFrame(this.localInsertion);
-
-                // Distance
-                const distance = worldOrigin.distanceTo(worldInsertion);
-
-                // Position (Midpoint)
-                const midpoint = worldOrigin.vadd(worldInsertion).scale(0.5);
-                this.mesh.position.set(midpoint.x, midpoint.y, midpoint.z);
-
-                // Orientation
-                const direction = worldInsertion.vsub(worldOrigin);
-                direction.normalize();
-
-                // Quaternion: Rotate from Up (0,1,0) to Direction
-                const quaternion = new THREE.Quaternion();
-                quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(direction.x, direction.y, direction.z));
-                this.mesh.quaternion.copy(quaternion);
-
-                // Initialize length on first frame
-                if (this.initialLength === null && distance > 0) this.initialLength = distance;
-
-                // Scale (Bulging Logic)
-                if (this.initialLength > 0) {
-                    const stretch = distance / this.initialLength;
-                    // Volume conservation: r ~ 1/sqrt(L) -> bulge ~ 1/sqrt(stretch)
-                    const bulge = Math.sqrt(1 / Math.max(0.1, stretch));
-
-                    this.mesh.scale.set(this.radius * bulge, distance, this.radius * bulge);
-                }
-            }
-        }
-
-        function init() {
-            // 1. Scene Setup
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x202020);
-
-            // 2. Camera Setup
-            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
-            camera.position.set(0, 1.6, 1.5);
-
-            // 3. Renderer Setup
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setPixelRatio(window.devicePixelRatio);
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.shadowMap.enabled = true; // Enable Shadows
-            renderer.xr.enabled = true;
-            document.body.appendChild(renderer.domElement);
-
-            // 4. VR Button
-            document.body.appendChild(VRButton.createButton(renderer));
-
-            // 5. Lighting
-            const ambientLight = new THREE.AmbientLight(0x404040, 2);
-            scene.add(ambientLight);
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-            directionalLight.position.set(5, 10, 5);
-            directionalLight.castShadow = true; // Cast Shadows
-            directionalLight.shadow.mapSize.width = 1024;
-            directionalLight.shadow.mapSize.height = 1024;
-            scene.add(directionalLight);
-
-            // 6. Physics World Setup
-            world = new CANNON.World();
-            world.gravity.set(0, -9.82, 0);
-            world.broadphase = new CANNON.NaiveBroadphase();
-            world.solver.iterations = 10;
-
-            // Ground (Physics)
-            const groundShape = new CANNON.Plane();
-            const groundBody = new CANNON.Body({ mass: 0 });
-            groundBody.addShape(groundShape);
-            groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
-            world.addBody(groundBody);
-
-            // Ground (Visual)
-            const floorGeo = new THREE.PlaneGeometry(10, 10);
-            const floorMat = new THREE.MeshPhongMaterial({ color: 0x444444 });
-            const floor = new THREE.Mesh(floorGeo, floorMat);
-            floor.rotation.x = -Math.PI / 2;
-            floor.receiveShadow = true;
-            scene.add(floor);
-
-            const gridHelper = new THREE.GridHelper(10, 10);
-            scene.add(gridHelper);
-
-            // 7. Raycaster
-            raycaster = new THREE.Raycaster();
-
-            // --- Skeleton Setup ---
-            createSkeleton();
-
-            // --- Muscles Setup ---
-            createMuscles();
-
-            // --- UI Setup ---
-            createUI();
-
-            // 8. Controllers Setup
-            setupControllers();
-
-            // 9. Window Resize
-            window.addEventListener('resize', onWindowResize);
-
-            // 10. OrbitControls (Desktop Debugging)
-            const controls = new OrbitControls(camera, renderer.domElement);
-            controls.target.set(0, 1.5, 0);
-            controls.update();
-        }
-
-        function createSkeleton() {
-            const boneMat = new THREE.MeshPhongMaterial({ color: 0xcccccc, wireframe: false });
-
-            // Shoulder
-            const shoulderShape = new CANNON.Sphere(0.1);
-            shoulderBody = new CANNON.Body({ mass: 0 });
-            shoulderBody.addShape(shoulderShape);
-            shoulderBody.position.set(0, 1.5, 0);
-            world.addBody(shoulderBody);
-            physicsBodies.push(shoulderBody);
-
-            const shoulderMesh = new THREE.Mesh(new THREE.SphereGeometry(0.1, 16, 16), boneMat);
-            scene.add(shoulderMesh);
-            physicsMeshes.push(shoulderMesh);
-
-            // Arm
-            const armLength = 0.4;
-            const armShape = new CANNON.Box(new CANNON.Vec3(0.05, armLength / 2, 0.05));
-            armBody = new CANNON.Body({ mass: 1 });
-            armBody.addShape(armShape);
-            armBody.position.set(0, 1.5 - armLength / 2, 0);
-            world.addBody(armBody);
-            physicsBodies.push(armBody);
-
-            const armMesh = new THREE.Mesh(new THREE.BoxGeometry(0.1, armLength, 0.1), boneMat);
-            scene.add(armMesh);
-            physicsMeshes.push(armMesh);
-
-            // Joint
-            armConstraint = new CANNON.HingeConstraint(shoulderBody, armBody, {
-                pivotA: new CANNON.Vec3(0, 0, 0),
-                pivotB: new CANNON.Vec3(0, armLength / 2, 0),
-                axisA: new CANNON.Vec3(0, 0, 1),
-                axisB: new CANNON.Vec3(0, 0, 1),
-                collideConnected: false
-            });
-            armConstraint.enableMotor();
-            armConstraint.setMotorSpeed(0);
-            world.addConstraint(armConstraint);
-        }
-
-        function createMuscles() {
-            // Supraspinatus
-            const supraspinatus = new Muscle(
-                scene,
-                shoulderBody, new CANNON.Vec3(-0.15, 0.1, 0),
-                armBody, new CANNON.Vec3(0, 0.15, 0),
-                { color: 0xff6666, radius: 0.04, name: 'Supraspinatus' }
-            );
-            muscles.push(supraspinatus);
-
-            // Deltoid
-            const deltoid = new Muscle(
-                scene,
-                shoulderBody, new CANNON.Vec3(0, 0.15, 0),
-                armBody, new CANNON.Vec3(0.06, 0.0, 0),
-                { color: 0xaa0000, radius: 0.07, name: 'Deltoid' }
-            );
-            muscles.push(deltoid);
-        }
-
-        function createUI() {
-            const uiGroup = new THREE.Group();
-            // Move UI lower and slightly closer to not block the view of the shoulder (Y=1.5)
-            uiGroup.position.set(0, 1.1, 0.8);
-            uiGroup.rotation.x = -0.4; // Tilt up to face user
-            scene.add(uiGroup);
-
-            // Panel
-            const panelGeo = new THREE.PlaneGeometry(0.4, 0.2);
-            const panelMat = new THREE.MeshPhongMaterial({ color: 0x333333, side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
-            const panel = new THREE.Mesh(panelGeo, panelMat);
-            uiGroup.add(panel);
-
-            // Button
-            const buttonGeo = new THREE.BoxGeometry(0.2, 0.08, 0.02);
-            const buttonMat = new THREE.MeshPhongMaterial({ color: 0x44aa44 });
-            uiButton = new THREE.Mesh(buttonGeo, buttonMat);
-            uiButton.position.z = 0.02;
-            uiGroup.add(uiButton);
-        }
-
-        function setupControllers() {
-            // Ray visual
-            const geometry = new THREE.BufferGeometry().setFromPoints([
-                new THREE.Vector3(0, 0, 0),
-                new THREE.Vector3(0, 0, -1)
-            ]);
-            const line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 0xffffff }));
-            line.scale.z = 5;
-
-            // Controller 1
-            const controller1 = renderer.xr.getController(0);
-            controller1.addEventListener('selectstart', onSelectStart);
-            controller1.add(line.clone());
-            scene.add(controller1);
-            controllers.push(controller1);
-
-            // Controller 2
-            const controller2 = renderer.xr.getController(1);
-            controller2.addEventListener('selectstart', onSelectStart);
-            controller2.add(line.clone());
-            scene.add(controller2);
-            controllers.push(controller2);
-
-            // Models
-            const controllerModelFactory = new XRControllerModelFactory();
-            const controllerGrip1 = renderer.xr.getControllerGrip(0);
-            controllerGrip1.add(controllerModelFactory.createControllerModel(controllerGrip1));
-            scene.add(controllerGrip1);
-            controllerGrips.push(controllerGrip1);
-
-            const controllerGrip2 = renderer.xr.getControllerGrip(1);
-            controllerGrip2.add(controllerModelFactory.createControllerModel(controllerGrip2));
-            scene.add(controllerGrip2);
-            controllerGrips.push(controllerGrip2);
-        }
-
-        function onSelectStart(event) {
-            const controller = event.target;
-
-            tempMatrix.identity().extractRotation(controller.matrixWorld);
-            raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
-            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
-
-            const intersects = raycaster.intersectObject(uiButton);
-
-            if (intersects.length > 0) {
-                toggleLayer();
-            }
-        }
-
-        function toggleLayer() {
-            isOuterLayerVisible = !isOuterLayerVisible;
-            const deltoid = muscles.find(m => m.name === 'Deltoid');
-            if (deltoid) {
-                deltoid.mesh.material.opacity = isOuterLayerVisible ? 0.9 : 0.2;
-                uiButton.material.color.setHex(isOuterLayerVisible ? 0x44aa44 : 0xaa4444);
-            }
-        }
-
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
-
-        function animate() {
-            renderer.setAnimationLoop(render);
-        }
-
-        let lastTime = 0;
-
-        function render(timestamp) {
-            if (!timestamp) timestamp = 0;
-            const dt = (timestamp - lastTime) / 1000;
-            lastTime = timestamp;
-
-            // Physics Step: Fixed 60Hz step, catching up to real time
-            // world.step(fixedTimeStep, timeSinceLastCalled, maxSubSteps)
-            world.step(1/60, dt, 3);
-
-            // Animation: Use real time (seconds)
-            const seconds = timestamp / 1000;
-            if (armConstraint) {
-                armConstraint.enableMotor();
-                armConstraint.setMotorSpeed(Math.cos(seconds * 2) * 2);
-            }
-
-            // Sync
-            for (let i = 0; i < physicsMeshes.length; i++) {
-                physicsMeshes[i].position.copy(physicsBodies[i].position);
-                physicsMeshes[i].quaternion.copy(physicsBodies[i].quaternion);
-            }
-
-            muscles.forEach(m => m.update());
-
-            renderer.render(scene, camera);
-        }
-
-        init();
-        animate();
-    </script>
 </body>
 </html>
